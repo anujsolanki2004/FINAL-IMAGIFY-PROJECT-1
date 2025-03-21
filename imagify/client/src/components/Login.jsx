@@ -26,6 +26,7 @@ const Login = () => {
                 photoURL: user.photoURL,
                 uid: user.uid,
             });
+            
 
             if (data.success) {
                 setToken(data.token);
