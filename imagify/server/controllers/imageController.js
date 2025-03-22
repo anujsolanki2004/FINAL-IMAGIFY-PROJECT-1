@@ -6,10 +6,9 @@ import userModel from '../models/userModel.js'
 // Controller function to generate image from prompt
 // backendUrl/api/image/generate-image
 export const generateImage = async (req, res) => {
-
   try {
-
-    const { userId, prompt } = req.body
+    const { prompt } = req.body
+    const userId = req.user.id // Get userId from auth middleware
 
     // Fetching User Details Using userId
     const user = await userModel.findById(userId)
@@ -19,7 +18,7 @@ export const generateImage = async (req, res) => {
     }
 
     // Checking User creditBalance
-    if (user.creditBalance === 0 || userModel.creditBalance < 0) {
+    if (user.creditBalance <= 0) {
       return res.json({ success: false, message: 'No Credit Balance', creditBalance: user.creditBalance })
     }
 
@@ -40,13 +39,25 @@ export const generateImage = async (req, res) => {
     const resultImage = `data:image/png;base64,${base64Image}`
 
     // Deduction of user credit 
-    await userModel.findByIdAndUpdate(user._id, { creditBalance: user.creditBalance - 1 })
+    const updatedUser = await userModel.findByIdAndUpdate(
+      user._id, 
+      { creditBalance: user.creditBalance - 1 },
+      { new: true }
+    )
 
     // Sending Response
-    res.json({ success: true, message: "Background Removed", resultImage, creditBalance: user.creditBalance - 1 })
+    res.json({ 
+      success: true, 
+      message: "Image Generated Successfully", 
+      resultImage, 
+      creditBalance: updatedUser.creditBalance 
+    })
 
   } catch (error) {
-    console.log(error.message)
-    res.json({ success: false, message: error.message })
+    console.error('Image Generation Error:', error)
+    res.json({ 
+      success: false, 
+      message: error.response?.data?.message || error.message || 'Failed to generate image' 
+    })
   }
 }

@@ -4,16 +4,23 @@ import razorpay from 'razorpay';
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import stripe from "stripe";
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 
 // API to register user
 const registerUser = async (req, res) => {
-
     try {
         const { name, email, password } = req.body;
 
         // checking for all data to register user
         if (!name || !email || !password) {
             return res.json({ success: false, message: 'Missing Details' })
+        }
+
+        // Check if user already exists
+        const existingUser = await userModel.findOne({ email });
+        if (existingUser) {
+            return res.json({ success: false, message: 'User already exists' });
         }
 
         // hashing user password
@@ -41,7 +48,6 @@ const registerUser = async (req, res) => {
 
 // API to login user
 const loginUser = async (req, res) => {
-
     try {
         const { email, password } = req.body;
         const user = await userModel.findOne({ email })
@@ -65,19 +71,58 @@ const loginUser = async (req, res) => {
     }
 }
 
+// API to handle Google login
+const handleGoogleLogin = async (req, res) => {
+    try {
+        const { email, name, photoURL, uid } = req.body;
+
+        // Find or create user
+        let user = await userModel.findOne({ email });
+
+        if (!user) {
+            // Create new user if doesn't exist
+            user = await userModel.create({
+                name,
+                email,
+                password: uid, // Using Firebase UID as password for Google users
+                photoURL,
+                isGoogleUser: true
+            });
+        }
+
+        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
+
+        res.json({
+            success: true,
+            token,
+            user: {
+                name: user.name,
+                email: user.email,
+                photoURL: user.photoURL
+            }
+        });
+
+    } catch (error) {
+        console.error('Google Login Error:', error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
 // API Controller function to get user available credits data
 const userCredits = async (req, res) => {
     try {
-
-        const { userId } = req.body
+        const userId = req.user.id; // Get userId from the token (set by auth middleware)
 
         // Fetching userdata using userId
-        const user = await userModel.findById(userId)
-        res.json({ success: true, credits: user.creditBalance, user: { name: user.name } })
-
+        const user = await userModel.findById(userId);
+        if (!user) {
+            return res.json({ success: false, message: "User not found" });
+        }
+        
+        res.json({ success: true, credits: user.creditBalance, user: { name: user.name } });
     } catch (error) {
-        console.log(error.message)
-        res.json({ success: false, message: error.message })
+        console.log(error.message);
+        res.json({ success: false, message: error.message });
     }
 }
 
@@ -318,5 +363,125 @@ const verifyStripe = async (req, res) => {
     }
 }
 
+// Forgot Password
+const forgotPassword = async (req, res) => {
+    try {
+        const { email } = req.body;
+        const user = await userModel.findOne({ email });
 
-export { registerUser, loginUser, userCredits, paymentRazorpay, verifyRazorpay, paymentStripe, verifyStripe }
+        if (!user) {
+            return res.json({ success: false, message: "User not found" });
+        }
+
+        // Generate reset token
+        const resetToken = crypto.randomBytes(20).toString('hex');
+        user.resetPasswordToken = crypto
+            .createHash('sha256')
+            .update(resetToken)
+            .digest('hex');
+        user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+
+        await user.save();
+
+        // Create reset URL
+        const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+        // Create email transporter
+        const transporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASS
+            }
+        });
+
+        // Verify transporter configuration
+        try {
+            await transporter.verify();
+            console.log("Email transporter verified successfully");
+        } catch (verifyError) {
+            console.error("Email transporter verification failed:", verifyError);
+            throw verifyError;
+        }
+
+        // Email content
+        const mailOptions = {
+            from: `"Imagify" <${process.env.EMAIL_USER}>`,
+            to: user.email,
+            subject: 'Reset Your Password - Imagify',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <h2 style="color: #2563eb; text-align: center;">Password Reset Request</h2>
+                    <p>Hello ${user.name},</p>
+                    <p>We received a request to reset your password for your Imagify account. If you didn't make this request, you can safely ignore this email.</p>
+                    <p>To reset your password, click the button below:</p>
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${resetUrl}" 
+                           style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
+                            Reset Password
+                        </a>
+                    </div>
+                    <p>This link will expire in 10 minutes for security reasons.</p>
+                    <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
+                    <p style="word-break: break-all; color: #2563eb;">${resetUrl}</p>
+                    <p>Best regards,<br>The Imagify Team</p>
+                </div>
+            `
+        };
+
+        // Send email
+        try {
+            await transporter.sendMail(mailOptions);
+            console.log("Password reset email sent successfully to:", user.email);
+            res.json({ success: true, message: "Password reset email sent" });
+        } catch (sendError) {
+            console.error("Failed to send email:", sendError);
+            res.json({ success: false, message: `Failed to send email: ${sendError.message}` });
+        }
+    } catch (error) {
+        console.error("Forgot password error:", error);
+        res.json({ success: false, message: `Error: ${error.message}` });
+    }
+};
+
+// Reset Password
+const resetPassword = async (req, res) => {
+    try {
+        const { token, password } = req.body;
+
+        // Hash token
+        const resetPasswordToken = crypto
+            .createHash('sha256')
+            .update(token)
+            .digest('hex');
+
+        const user = await userModel.findOne({
+            resetPasswordToken,
+            resetPasswordExpire: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.json({ success: false, message: "Invalid or expired reset token" });
+        }
+
+        // Hash new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // Update password and clear reset fields
+        user.password = hashedPassword;
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+
+        await user.save();
+
+        res.json({ success: true, message: "Password has been reset" });
+    } catch (error) {
+        console.log(error);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+export { registerUser, loginUser, userCredits, paymentRazorpay, verifyRazorpay, paymentStripe, verifyStripe, forgotPassword, resetPassword, handleGoogleLogin }

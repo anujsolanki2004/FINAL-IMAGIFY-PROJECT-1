@@ -6,6 +6,7 @@ import Result from './pages/Result'
 import BuyCredit from './pages/BuyCredit'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
+import ResetPassword from './components/ResetPassword'
 
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -27,6 +28,7 @@ const App = () => {
         <Route path='/result' element={<Result />} />
         <Route path='/buy' element={<BuyCredit />} />
         <Route path='/verify' element={<Verify />} />
+        <Route path='/reset-password/:token' element={<ResetPassword />} />
       </Routes>
       <Footer />
     </div>

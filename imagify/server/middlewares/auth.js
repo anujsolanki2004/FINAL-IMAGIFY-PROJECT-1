@@ -16,10 +16,8 @@ const authUser = async (req, res, next) => {
 
         // Check if the decoded token contains a user ID
         if (tokenDecode.id) {
-
-            // Attach user ID to the request body
-            req.body.userId = tokenDecode.id; 
-            
+            // Attach user ID to the request object
+            req.user = { id: tokenDecode.id };
         } else {
             return res.json({ success: false, message: 'Not Authorized. Login Again' });
         }
