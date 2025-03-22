@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken'
 import stripe from "stripe";
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
+import { sendPasswordResetEmail } from '../utils/mailgun';
 
 // API to register user
 const registerUser = async (req, res) => {
@@ -370,79 +371,42 @@ const forgotPassword = async (req, res) => {
         const user = await userModel.findOne({ email });
 
         if (!user) {
-            return res.json({ success: false, message: "User not found" });
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
         }
 
         // Generate reset token
-        const resetToken = crypto.randomBytes(20).toString('hex');
+        const resetToken = crypto.randomBytes(32).toString('hex');
         user.resetPasswordToken = crypto
             .createHash('sha256')
             .update(resetToken)
             .digest('hex');
-        user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
+        user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
 
         await user.save();
 
-        // Create reset URL
-        const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+        // Send reset email
+        const emailSent = await sendPasswordResetEmail(email, resetToken);
 
-        // Create email transporter
-        const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 587,
-            secure: false,
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS
-            }
+        if (!emailSent) {
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to send reset email'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Password reset email sent'
         });
-
-        // Verify transporter configuration
-        try {
-            await transporter.verify();
-            console.log("Email transporter verified successfully");
-        } catch (verifyError) {
-            console.error("Email transporter verification failed:", verifyError);
-            throw verifyError;
-        }
-
-        // Email content
-        const mailOptions = {
-            from: `"Imagify" <${process.env.EMAIL_USER}>`,
-            to: user.email,
-            subject: 'Reset Your Password - Imagify',
-            html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                    <h2 style="color: #2563eb; text-align: center;">Password Reset Request</h2>
-                    <p>Hello ${user.name},</p>
-                    <p>We received a request to reset your password for your Imagify account. If you didn't make this request, you can safely ignore this email.</p>
-                    <p>To reset your password, click the button below:</p>
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="${resetUrl}" 
-                           style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
-                            Reset Password
-                        </a>
-                    </div>
-                    <p>This link will expire in 10 minutes for security reasons.</p>
-                    <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
-                    <p style="word-break: break-all; color: #2563eb;">${resetUrl}</p>
-                    <p>Best regards,<br>The Imagify Team</p>
-                </div>
-            `
-        };
-
-        // Send email
-        try {
-            await transporter.sendMail(mailOptions);
-            console.log("Password reset email sent successfully to:", user.email);
-            res.json({ success: true, message: "Password reset email sent" });
-        } catch (sendError) {
-            console.error("Failed to send email:", sendError);
-            res.json({ success: false, message: `Failed to send email: ${sendError.message}` });
-        }
     } catch (error) {
-        console.error("Forgot password error:", error);
-        res.json({ success: false, message: `Error: ${error.message}` });
+        console.error('Forgot Password Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error processing password reset request'
+        });
     }
 };
 
@@ -459,28 +423,33 @@ const resetPassword = async (req, res) => {
 
         const user = await userModel.findOne({
             resetPasswordToken,
-            resetPasswordExpire: { $gt: Date.now() }
+            resetPasswordExpires: { $gt: Date.now() }
         });
 
         if (!user) {
-            return res.json({ success: false, message: "Invalid or expired reset token" });
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid or expired reset token'
+            });
         }
 
-        // Hash new password
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-
-        // Update password and clear reset fields
-        user.password = hashedPassword;
+        // Update password
+        user.password = password;
         user.resetPasswordToken = undefined;
-        user.resetPasswordExpire = undefined;
+        user.resetPasswordExpires = undefined;
 
         await user.save();
 
-        res.json({ success: true, message: "Password has been reset" });
+        res.json({
+            success: true,
+            message: 'Password has been reset'
+        });
     } catch (error) {
-        console.log(error);
-        res.json({ success: false, message: error.message });
+        console.error('Reset Password Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error resetting password'
+        });
     }
 };
 
