@@ -10,7 +10,12 @@ node_modules/
 /build
 /dist
 
+<<<<<<< HEAD
 # Environment variables
+=======
+# Misc
+.DS_Store
+>>>>>>> a2f442d1a66153668d42dc78b9466f0e9be1a90d
 .env
 .env.local
 .env.development.local
@@ -25,6 +30,7 @@ yarn-error.log*
 # Editor directories and files
 .idea/
 .vscode/
+<<<<<<< HEAD
 *.swp
 *.swo
 
@@ -36,3 +42,14 @@ yarn-error.log*
 .Trashes
 ehthumbs.db
 Thumbs.db 
+=======
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Firebase
+.firebase/
+firebase-debug.log 
+>>>>>>> a2f442d1a66153668d42dc78b9466f0e9be1a90d
